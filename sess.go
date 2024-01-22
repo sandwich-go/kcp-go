@@ -10,6 +10,7 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"net"
@@ -582,7 +583,10 @@ func (s *UDPSession) update() {
 		}
 		s.uncork()
 		s.mu.Unlock()
-		monitor.Timing("kcp_update_interval", time.Duration(interval), map[string]string{})
+		monitor.Timing("kcp_update_interval", time.Duration(interval)*time.Millisecond, map[string]string{})
+		if interval != s.kcp.interval {
+			fmt.Println("kcp interval: ", time.Duration(interval)*time.Millisecond)
+		}
 		// self-synchronized timed scheduling
 		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
 	}
