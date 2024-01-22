@@ -585,7 +585,7 @@ func (s *UDPSession) update() {
 		s.mu.Unlock()
 		monitor.Timing("kcp_update_interval", time.Duration(interval)*time.Millisecond, map[string]string{})
 		if interval != s.kcp.interval {
-			fmt.Println("kcp interval: ", time.Duration(interval)*time.Millisecond)
+			fmt.Println("kcp interval: ", interval, "check return", s.kcp.Check())
 		}
 		// self-synchronized timed scheduling
 		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
