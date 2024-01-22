@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/sandwich-go/logbus/monitor"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -581,6 +582,7 @@ func (s *UDPSession) update() {
 		}
 		s.uncork()
 		s.mu.Unlock()
+		monitor.Timing("kcp_update_interval", time.Duration(interval), map[string]string{})
 		// self-synchronized timed scheduling
 		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
 	}
