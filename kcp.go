@@ -276,6 +276,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 	if count > 0 {
 		kcp.rcv_queue = kcp.remove_front(kcp.rcv_queue, count)
+		recvQueueLen.Observe(float64(len(kcp.rcv_queue)))
 	}
 
 	// move available data from rcv_buf -> rcv_queue
@@ -292,7 +293,9 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 
 	if count > 0 {
 		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
+		recvQueueLen.Observe(float64(len(kcp.rcv_queue)))
 		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
+		recvBufferLen.Observe(float64(len(kcp.rcv_buf)))
 	}
 
 	// fast recover
@@ -366,6 +369,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 			seg.frg = 0
 		}
 		kcp.snd_queue = append(kcp.snd_queue, seg)
+		sendQueueLen.Observe(float64(len(kcp.snd_queue)))
 		buffer = buffer[size:]
 	}
 	return 0
@@ -455,6 +459,7 @@ func (kcp *KCP) parse_una(una uint32) int {
 	}
 	if count > 0 {
 		kcp.snd_buf = kcp.remove_front(kcp.snd_buf, count)
+		sendBufferLen.Observe(float64(len(kcp.snd_buf)))
 	}
 	return count
 }
@@ -500,6 +505,7 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 			copy(kcp.rcv_buf[insert_idx+1:], kcp.rcv_buf[insert_idx:])
 			kcp.rcv_buf[insert_idx] = newseg
 		}
+		recvBufferLen.Observe(float64(len(kcp.rcv_buf)))
 	}
 
 	// move available data from rcv_buf -> rcv_queue
@@ -515,7 +521,9 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	}
 	if count > 0 {
 		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
+		recvQueueLen.Observe(float64(len(kcp.rcv_queue)))
 		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
+		recvBufferLen.Observe(float64(len(kcp.rcv_buf)))
 	}
 
 	return repeat
@@ -771,11 +779,13 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		newseg.cmd = IKCP_CMD_PUSH
 		newseg.sn = kcp.snd_nxt
 		kcp.snd_buf = append(kcp.snd_buf, newseg)
+		sendBufferLen.Observe(float64(len(kcp.snd_buf)))
 		kcp.snd_nxt++
 		newSegsCount++
 	}
 	if newSegsCount > 0 {
 		kcp.snd_queue = kcp.remove_front(kcp.snd_queue, newSegsCount)
+		sendQueueLen.Observe(float64(len(kcp.snd_queue)))
 	}
 
 	// calculate resent
@@ -1079,4 +1089,6 @@ func (kcp *KCP) ReleaseTX() {
 	}
 	kcp.snd_queue = nil
 	kcp.snd_buf = nil
+	sendQueueLen.Observe(float64(len(kcp.snd_queue)))
+	sendBufferLen.Observe(float64(len(kcp.snd_buf)))
 }
