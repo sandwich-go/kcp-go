@@ -10,7 +10,6 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"net"
@@ -19,7 +18,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sandwich-go/logbus/monitor"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -583,10 +581,7 @@ func (s *UDPSession) update() {
 		}
 		s.uncork()
 		s.mu.Unlock()
-		monitor.Timing("kcp_update_interval", time.Duration(interval)*time.Millisecond, map[string]string{})
-		if interval != s.kcp.interval {
-			fmt.Println("kcp interval: ", interval, "check return", s.kcp.Check()-currentMs())
-		}
+		kcpUpdateTiming.Observe(float64(interval))
 		// self-synchronized timed scheduling
 		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
 	}

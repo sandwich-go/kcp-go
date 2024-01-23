@@ -129,32 +129,31 @@ func (seg *segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
-// KCP defines a single KCP connection
+// KCP 定义了一个 KCP 连接
 type KCP struct {
-	conv, mtu, mss, state                  uint32
-	snd_una, snd_nxt, rcv_nxt              uint32
-	ssthresh                               uint32
-	rx_rttvar, rx_srtt                     int32
-	rx_rto, rx_minrto                      uint32
-	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
-	interval, ts_flush                     uint32
-	nodelay, updated                       uint32
-	ts_probe, probe_wait                   uint32
-	dead_link, incr                        uint32
+	conv, mtu, mss, state                  uint32 // 会话标识，最大传输单元，最大分片大小，连接状态
+	snd_una, snd_nxt, rcv_nxt              uint32 // 发送窗口的第一个未确认序列号，下一个待发送的序列号，下一个待接收的序列号
+	ssthresh                               uint32 // 慢启动阈值
+	rx_rttvar, rx_srtt                     int32  // 接收端的 RTT 方差，接收端的平滑 RTT
+	rx_rto, rx_minrto                      uint32 // 接收端的超时重传时间，接收端的最小超时重传时间
+	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32 // 发送窗口大小，接收窗口大小，远端窗口大小，拥塞窗口大小，窗口探测标志
+	interval, ts_flush                     uint32 // 内部处理间隔，下一次刷新时间戳
+	nodelay, updated                       uint32 // 是否启用 nodelay 模式，内部更新标志
+	ts_probe, probe_wait                   uint32 // 下一次窗口探测的时间戳，窗口探测等待时间
+	dead_link, incr                        uint32 // 最大重传次数，快速重传的 ACK 累积次数
 
-	fastresend     int32
-	nocwnd, stream int32
+	fastresend     int32     // 快速重传标志
+	nocwnd, stream int32     // 是否关闭拥塞控制，流模式标志
+	snd_queue      []segment // 发送队列
+	rcv_queue      []segment // 接收队列
+	snd_buf        []segment // 发送缓冲区
+	rcv_buf        []segment // 接收缓冲区
 
-	snd_queue []segment
-	rcv_queue []segment
-	snd_buf   []segment
-	rcv_buf   []segment
+	acklist []ackItem // ACK 列表
 
-	acklist []ackItem
-
-	buffer   []byte
-	reserved int
-	output   output_callback
+	buffer   []byte          // 缓冲区
+	reserved int             // 保留字段
+	output   output_callback // 输出回调函数
 }
 
 type ackItem struct {
@@ -168,6 +167,8 @@ type ackItem struct {
 //
 // 'output' function will be called whenever these is data to be sent on wire.
 func NewKCP(conv uint32, output output_callback) *KCP {
+	kcpCount.Inc()
+
 	kcp := new(KCP)
 	kcp.conv = conv
 	kcp.snd_wnd = IKCP_WND_SND
@@ -1065,6 +1066,7 @@ func (kcp *KCP) remove_front(q []segment, n int) []segment {
 
 // Release all cached outgoing segments
 func (kcp *KCP) ReleaseTX() {
+	kcpCount.Dec()
 	for k := range kcp.snd_queue {
 		if kcp.snd_queue[k].data != nil {
 			xmitBuf.Put(kcp.snd_queue[k].data)
