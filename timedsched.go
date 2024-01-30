@@ -8,12 +8,10 @@ import (
 )
 
 // SystemTimedSched is the library level timed-scheduler
-var SystemTimedSched *TimedSched = NewTimedSched(runtime.NumCPU())
+var SystemTimedSched *TimedSched
 
 func InitTimedSched() {
-	if runtime.NumCPU() != runtime.GOMAXPROCS(0) {
-		SystemTimedSched = NewTimedSched(runtime.GOMAXPROCS(0))
-	}
+	SystemTimedSched = NewTimedSched(runtime.GOMAXPROCS(0))
 }
 
 type timedFunc struct {
