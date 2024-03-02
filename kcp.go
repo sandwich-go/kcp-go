@@ -131,24 +131,25 @@ func (seg *segment) encode(ptr []byte) []byte {
 
 // KCP defines a single KCP connection
 type KCP struct {
-	conv, mtu, mss, state                  uint32
-	snd_una, snd_nxt, rcv_nxt              uint32
-	ssthresh                               uint32
-	rx_rttvar, rx_srtt                     int32
-	rx_rto, rx_minrto                      uint32
-	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
-	interval, ts_flush                     uint32
-	nodelay, updated                       uint32
-	ts_probe, probe_wait                   uint32
-	dead_link, incr                        uint32
-
-	fastresend     int32
-	nocwnd, stream int32
-
-	snd_queue []segment
-	rcv_queue []segment
-	snd_buf   []segment
-	rcv_buf   []segment
+	conv, mtu, mss, state                  uint32 // 会话标识，最大传输单元，最大分片大小，连接状态
+	snd_una, snd_nxt, rcv_nxt              uint32 // 发送窗口的第一个未确认序列号，下一个待发送的序列号，下一个待接收的序列号
+	ssthresh                               uint32 // 慢启动阈值
+	rx_rttvar, rx_srtt                     int32  // 接收端的 RTT 方差，接收端的平滑 RTT
+	rx_rto, rx_minrto                      uint32 // 接收端的超时重传时间，接收端的最小超时重传时间
+	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32 // 发送窗口大小，接收窗口大小，远端窗口大小，拥塞窗口大小，窗口探测标志
+	interval, ts_flush                     uint32 // 内部处理间隔，下一次刷新时间戳
+	nodelay, updated                       uint32 // 是否启用 nodelay 模式，内部更新标志
+	ts_probe, probe_wait                   uint32 // 下一次窗口探测的时间戳，窗口探测等待时间
+	dead_link, incr                        uint32 // 最大重传次数，快速重传的 ACK 累积次数
+	lastest_active                         time.Time
+	enable_keep_alive                      bool
+	fastresend                             int32     // 快速重传标志
+	nocwnd, stream                         int32     // 是否关闭拥塞控制，流模式标志
+	snd_queue                              []segment // 发送队列
+	rcv_queue                              []segment // 接收队列
+	keep_alive_queue                       []segment // 保活队列
+	snd_buf                                []segment // 发送缓冲区
+	rcv_buf                                []segment // 接收缓冲区
 
 	acklist []ackItem
 
@@ -183,6 +184,9 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
+	kcp.enable_keep_alive = false
+	kcp.lastest_active = time.Now()
+
 	return kcp
 }
 
@@ -368,6 +372,14 @@ func (kcp *KCP) Send(buffer []byte) int {
 		buffer = buffer[size:]
 	}
 	return 0
+}
+
+// SendKeepAlive 发送心跳
+func (kcp *KCP) SendKeepAlive() {
+	if len(kcp.keep_alive_queue) != 0 {
+		return
+	}
+	kcp.keep_alive_queue = append(kcp.keep_alive_queue, kcp.newSegment(0))
 }
 
 func (kcp *KCP) update_ack(rtt int32) {
@@ -659,6 +671,11 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	} else if ackNoDelay && len(kcp.acklist) > 0 { // ack immediately
 		kcp.flush(true)
 	}
+
+	if inSegs != 0 && kcp.enable_keep_alive {
+		kcp.lastest_active = time.Now()
+	}
+
 	return 0
 }
 
@@ -775,6 +792,19 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	}
 	if newSegsCount > 0 {
 		kcp.snd_queue = kcp.remove_front(kcp.snd_queue, newSegsCount)
+	}
+
+	if len(kcp.keep_alive_queue) != 0 {
+		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) < 0 {
+			newseg := kcp.keep_alive_queue[0]
+
+			kcp.keep_alive_queue = nil
+			newseg.conv = kcp.conv
+			newseg.cmd = IKCP_CMD_PUSH
+			newseg.sn = kcp.snd_nxt
+			kcp.snd_buf = append(kcp.snd_buf, newseg)
+			kcp.snd_nxt++
+		}
 	}
 
 	// calculate resent
@@ -1044,6 +1074,15 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 		kcp.rcv_wnd = uint32(rcvwnd)
 	}
 	return 0
+}
+
+func (kcp *KCP) SetKeepAlive(enable bool) {
+	kcp.enable_keep_alive = enable
+}
+
+// LatestActive 最新一次活跃, 指收到包
+func (kcp *KCP) LatestActive() time.Time {
+	return kcp.lastest_active
 }
 
 // WaitSnd gets how many packet is waiting to be sent
