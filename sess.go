@@ -544,7 +544,7 @@ func (s *UDPSession) SetKeepAlive(enable bool, interval, idle time.Duration, sen
 	defer s.mu.Unlock()
 	s.keepAliveEnable = enable
 	s.keepAliveInterval = interval
-	s.keepAliveInterval = idle
+	s.keepAliveIdle = idle
 	s.keepAliveSide = sendSide
 	s.kcp.SetKeepAlive(enable)
 }
@@ -797,8 +797,8 @@ func (s *UDPSession) updateKeepAlive(timeNow time.Time) bool {
 		return false
 	}
 
-	sd := (s.keepAliveSide == keepAliveBothSend) || (s.ownConn && s.keepAliveIdle == keepAliveClientSend) ||
-		(!s.ownConn && s.keepAliveIdle == keepAliveServerSend)
+	sd := (s.keepAliveSide == keepAliveBothSend) || (s.ownConn && s.keepAliveSide == keepAliveClientSend) ||
+		(!s.ownConn && s.keepAliveSide == keepAliveServerSend)
 
 	lastSendKeepAlive := s.keepAliveLastSent
 	if sd && timeNow.After(lastActive.Add(s.keepAliveInterval)) && timeNow.After(lastSendKeepAlive.Add(s.keepAliveInterval)) {
