@@ -141,13 +141,15 @@ type KCP struct {
 	nodelay, updated                       uint32 // 是否启用 nodelay 模式，内部更新标志
 	ts_probe, probe_wait                   uint32 // 下一次窗口探测的时间戳，窗口探测等待时间
 	dead_link, incr                        uint32 // 最大重传次数，快速重传的 ACK 累积次数
-
-	fastresend     int32     // 快速重传标志
-	nocwnd, stream int32     // 是否关闭拥塞控制，流模式标志
-	snd_queue      []segment // 发送队列
-	rcv_queue      []segment // 接收队列
-	snd_buf        []segment // 发送缓冲区
-	rcv_buf        []segment // 接收缓冲区
+	lastest_active                         time.Time
+	enable_keep_alive                      bool
+	fastresend                             int32     // 快速重传标志
+	nocwnd, stream                         int32     // 是否关闭拥塞控制，流模式标志
+	snd_queue                              []segment // 发送队列
+	rcv_queue                              []segment // 接收队列
+	keep_alive_queue                       []segment // 保活队列
+	snd_buf                                []segment // 发送缓冲区
+	rcv_buf                                []segment // 接收缓冲区
 
 	acklist []ackItem // ACK 列表
 
@@ -184,6 +186,9 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
+	kcp.enable_keep_alive = false
+	kcp.lastest_active = time.Now()
+
 	return kcp
 }
 
@@ -373,6 +378,14 @@ func (kcp *KCP) Send(buffer []byte) int {
 		buffer = buffer[size:]
 	}
 	return 0
+}
+
+// SendKeepAlive 发送心跳
+func (kcp *KCP) SendKeepAlive() {
+	if len(kcp.keep_alive_queue) != 0 {
+		return
+	}
+	kcp.keep_alive_queue = append(kcp.keep_alive_queue, kcp.newSegment(0))
 }
 
 func (kcp *KCP) update_ack(rtt int32) {
@@ -668,6 +681,11 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	} else if ackNoDelay && len(kcp.acklist) > 0 { // ack immediately
 		kcp.flush(true)
 	}
+
+	if inSegs != 0 && kcp.enable_keep_alive {
+		kcp.lastest_active = time.Now()
+	}
+
 	return 0
 }
 
@@ -786,6 +804,19 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	if newSegsCount > 0 {
 		kcp.snd_queue = kcp.remove_front(kcp.snd_queue, newSegsCount)
 		sendQueueLen.Observe(float64(len(kcp.snd_queue)))
+	}
+
+	if len(kcp.keep_alive_queue) != 0 {
+		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) < 0 {
+			newseg := kcp.keep_alive_queue[0]
+
+			kcp.keep_alive_queue = nil
+			newseg.conv = kcp.conv
+			newseg.cmd = IKCP_CMD_PUSH
+			newseg.sn = kcp.snd_nxt
+			kcp.snd_buf = append(kcp.snd_buf, newseg)
+			kcp.snd_nxt++
+		}
 	}
 
 	// calculate resent
@@ -1055,6 +1086,15 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 		kcp.rcv_wnd = uint32(rcvwnd)
 	}
 	return 0
+}
+
+func (kcp *KCP) SetKeepAlive(enable bool) {
+	kcp.enable_keep_alive = enable
+}
+
+// LatestActive 最新一次活跃, 指收到包
+func (kcp *KCP) LatestActive() time.Time {
+	return kcp.lastest_active
 }
 
 // WaitSnd gets how many packet is waiting to be sent

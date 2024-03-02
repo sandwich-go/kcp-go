@@ -37,6 +37,11 @@ const (
 
 	// accept backlog
 	acceptBacklog = 128
+
+	// keep alive send side
+	keepAliveClientSend = 0
+	keepAliveServerSend = 1
+	keepAliveBothSend   = 2
 )
 
 var (
@@ -105,6 +110,13 @@ type (
 		txqueue         []ipv4.Message
 		xconn           batchConn // for x/net
 		xconnWriteError error
+
+		// keep alive
+		keepAliveEnable   bool
+		keepAliveInterval time.Duration
+		keepAliveIdle     time.Duration
+		keepAliveLastSent time.Time
+		keepAliveSide     int32
 
 		mu sync.Mutex
 	}
@@ -181,8 +193,15 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
 	}
 
+	timeNow := time.Now()
+	sess.keepAliveEnable = false
+	sess.keepAliveInterval = 30 * time.Second
+	sess.keepAliveIdle = 60 * time.Second
+	sess.keepAliveLastSent = timeNow
+	sess.keepAliveSide = 0
+
 	// start per-session updater
-	SystemTimedSched.Put(sess.update, time.Now())
+	SystemTimedSched.Put(sess.update, timeNow)
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -520,6 +539,16 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	return errInvalidOperation
 }
 
+func (s *UDPSession) SetKeepAlive(enable bool, interval, idle time.Duration, sendSide int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keepAliveEnable = enable
+	s.keepAliveInterval = interval
+	s.keepAliveInterval = idle
+	s.keepAliveSide = sendSide
+	s.kcp.SetKeepAlive(enable)
+}
+
 // post-processing for sending a packet from kcp core
 // steps:
 // 1. FEC packet generation
@@ -573,7 +602,12 @@ func (s *UDPSession) update() {
 	select {
 	case <-s.die:
 	default:
+		timeNow := time.Now()
 		s.mu.Lock()
+		if !s.updateKeepAlive(timeNow) {
+			s.mu.Unlock()
+			return
+		}
 		interval := s.kcp.flush(false)
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
@@ -583,7 +617,7 @@ func (s *UDPSession) update() {
 		s.mu.Unlock()
 		kcpUpdateTiming.Observe(float64(interval))
 		// self-synchronized timed scheduling
-		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
+		SystemTimedSched.Put(s.update, timeNow.Add(time.Duration(interval)*time.Millisecond))
 	}
 }
 
@@ -749,7 +783,30 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if fecRecovered > 0 {
 		atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 	}
+}
 
+func (s *UDPSession) updateKeepAlive(timeNow time.Time) bool {
+	if !s.keepAliveEnable {
+		return true
+	}
+
+	lastActive := s.kcp.LatestActive()
+	if timeNow.After(lastActive.Add(s.keepAliveIdle)) {
+		// 超过idle时间未有包到达, 断开连接，通知上层
+		_ = s.Close()
+		return false
+	}
+
+	sd := (s.keepAliveSide == keepAliveBothSend) || (s.ownConn && s.keepAliveIdle == keepAliveClientSend) ||
+		(!s.ownConn && s.keepAliveIdle == keepAliveServerSend)
+
+	lastSendKeepAlive := s.keepAliveLastSent
+	if sd && timeNow.After(lastActive.Add(s.keepAliveInterval)) && timeNow.After(lastSendKeepAlive.Add(s.keepAliveInterval)) {
+		s.kcp.SendKeepAlive()
+		s.keepAliveLastSent = timeNow
+	}
+
+	return true
 }
 
 type (
