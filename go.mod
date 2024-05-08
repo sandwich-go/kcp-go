@@ -3,10 +3,12 @@ module github.com/sandwich-go/kcp-go
 require (
 	github.com/klauspost/reedsolomon v1.12.0
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_golang v1.14.0
 	github.com/sandwich-go/logbus v1.1.0-daily.1
 	github.com/stretchr/testify v1.8.1
 	github.com/templexxx/xorsimd v0.4.2
 	github.com/tjfoc/gmsm v1.4.1
+	github.com/xtaci/kcp-go/v5 v5.6.8
 	github.com/xtaci/lossyconn v0.0.0-20190602105132-8df528c0c9ae
 	golang.org/x/crypto v0.17.0
 	golang.org/x/net v0.19.0
@@ -22,7 +24,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/client_golang v1.14.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect

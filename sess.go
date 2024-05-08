@@ -603,11 +603,10 @@ func (s *UDPSession) update() {
 	case <-s.die:
 	default:
 		timeNow := time.Now()
-		s.mu.Lock()
 		if !s.updateKeepAlive(timeNow) {
-			s.mu.Unlock()
 			return
 		}
+		s.mu.Lock()
 		interval := s.kcp.flush(false)
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
@@ -802,6 +801,10 @@ func (s *UDPSession) updateKeepAlive(timeNow time.Time) bool {
 
 	lastSendKeepAlive := s.keepAliveLastSent
 	if sd && timeNow.After(lastActive.Add(s.keepAliveInterval)) && timeNow.After(lastSendKeepAlive.Add(s.keepAliveInterval)) {
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
 		s.kcp.SendKeepAlive()
 		s.keepAliveLastSent = timeNow
 	}
